@@ -1,0 +1,418 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>急診待床看板產生器</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  :root{
+    --ink:#101720; --slate:#4a5a68; --line:#c9d4dd; --paper:#eef2f5; --card:#fff;
+    --accent:#0f5f7a; --accent-soft:#e2f0f4; --warn:#a1410d; --warn-soft:#fdf1e3;
+    /* 由原圖取樣的色票 */
+    --im-lite:#b4c6e7; --im-dark:#9bc2e6;
+    --su-lite:#f8cbad; --su-dark:#f4b084;
+    --ot-lite:#c6e0b4; --ot-dark:#a9d08e;
+    --icu-head:#dfa7e6; --icu-lite:#e6ccff; --icu-ink:#7030a0;
+    --hdr-grey:#f2f2f2; --red:#ff0000;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,sans-serif;font-size:15px;line-height:1.6}
+  .wrap{max-width:1280px;margin:0 auto;padding:20px 14px 70px}
+  header{margin-bottom:16px}
+  h1{font-size:20px;margin:0;letter-spacing:.04em}
+  header .sub{color:var(--slate);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 14px 18px;margin-bottom:16px}
+  .card.tight{padding:12px 12px 14px}
+  .card h2{font-size:12.5px;margin:0 0 12px;letter-spacing:.12em;color:var(--accent);font-weight:700}
+  .card h2 small{display:block;letter-spacing:0;font-weight:400;color:var(--slate);font-size:12px;margin-top:2px}
+  textarea{width:100%;min-height:170px;resize:vertical;padding:12px;border:1px solid var(--line);border-radius:9px;
+    background:#fbfdfe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:16px;line-height:1.7;color:var(--ink)}
+  textarea:focus,input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  button{font:inherit;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--accent);
+    background:var(--accent);color:#fff;padding:12px 18px;border-radius:9px;min-height:46px;flex:1 1 150px}
+  button.ghost{background:#fff;color:var(--accent)}
+  button.plain{background:#fff;color:var(--slate);border-color:var(--line);flex:0 1 auto;min-height:38px;
+    padding:7px 14px;font-size:13.5px}
+  button:active{filter:brightness(1.15)}
+  button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+  label.date{display:flex;align-items:center;gap:8px;color:var(--slate);font-size:14px;flex:1 1 100%}
+  input[type=date]{font:inherit;font-size:16px;padding:11px;border:1px solid var(--line);border-radius:9px;background:#fff;flex:1}
+  .msg{margin-top:12px;font-size:13.5px;border-radius:9px;padding:10px 12px;display:none}
+  .msg.ok{display:block;background:var(--accent-soft);color:#0b4658;border:1px solid #b9dbe4}
+  .msg.warn{display:block;background:var(--warn-soft);color:var(--warn);border:1px solid #f0d3b0}
+  .hint{color:var(--slate);font-size:12.5px;margin:12px 0 0}
+
+  /* 昨日入住 ICU：緊湊版 */
+  .grid7{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .fld{border:1px solid var(--line);border-radius:8px;padding:4px 4px 5px;background:#fbfdfe;text-align:center}
+  .fld span{display:block;font-size:10.5px;letter-spacing:.04em;color:var(--slate);font-weight:700;margin-bottom:2px}
+  .fld input{width:100%;min-width:0;font:inherit;font-size:17px;font-weight:700;text-align:center;
+    border:1px solid var(--line);border-radius:6px;padding:6px 0;background:#fff;color:var(--ink);-moz-appearance:textfield}
+  .fld input::-webkit-outer-spin-button,.fld input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+  /* ===== 看板本體：比照原圖配色 ===== */
+  .fitbox{overflow:hidden;margin-top:4px}
+  #board{background:#fff;padding:6px 10px 12px;display:inline-block;transform-origin:top left;
+    font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif}
+  #board .title{text-align:center;font-size:27px;color:#000;padding:2px 0 8px}
+  #board table{border-collapse:collapse;table-layout:fixed}
+  #board td{border:1px solid #000;height:24px;text-align:center;vertical-align:middle;font-size:15px;
+    padding:0 3px;background:#fff;color:#000;white-space:nowrap}
+  .c1{width:117px}.c2{width:125px}.cd{width:101px}
+  tr.head td{height:41px}
+  td.hd{background:var(--hdr-grey);font-size:13.5px;line-height:1.25}
+  td.total-label{background:#ffff00;font-size:21px;font-weight:700}
+  td.total-num{background:#ffff00;font-size:21px;font-weight:700;color:var(--red)}
+
+  tr.r-im-lbl td{background:var(--im-lite)}
+  tr.r-im-val td{background:var(--im-dark)}
+  tr.r-su-lbl td{background:var(--su-dark)}
+  tr.r-su-val td{background:var(--su-lite)}
+  tr.r-ot-lbl td{background:var(--ot-dark)}
+  tr.r-ot-val td{background:var(--ot-lite)}
+  tr.r-su-lbl td.c1{background:var(--su-lite)}
+  tr.r-ot-lbl td.c1{background:var(--ot-lite)}
+  td.lbl{color:var(--red);font-weight:700}
+  td.sum{color:var(--red);font-weight:700;font-size:17px;vertical-align:middle}
+
+  tr.icu-top td.icu-head{background:var(--icu-head);font-weight:700}
+  tr.icu-top td.blank{background:#fff;border-left:none;border-bottom:none}
+  tr.r-icu td{background:var(--icu-lite);color:var(--icu-ink);font-weight:700}
+  tr.r-icu td.v{background:#fff;color:#000;font-weight:400}
+  .icu-gap{height:21px}
+
+  td.edit{cursor:text}
+  td.edit:focus{outline:2px solid #0f5f7a;outline-offset:-2px}
+
+  @media(min-width:520px){ .grid7{grid-template-columns:repeat(7,1fr)} }
+  @media(min-width:700px){
+    .wrap{padding:28px 20px 60px}
+    button{flex:0 1 auto}
+    label.date,input[type=date]{flex:0 1 auto}
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>急診待床看板產生器</h1>
+    <div class="sub">貼上每日文字 → 補昨日入住 → 存成圖片</div>
+  </header>
+
+  <div class="card">
+    <h2>1　貼上今天的資料</h2>
+    <textarea id="src" spellcheck="false" placeholder="【內科】急診待床-內科:81 ｜ 心內:6 | 血腫:9 | 風濕:1 | 胸腔:21 | 腎臟:7 | 感染:11 | 新代:5 | 腸胃:21
+【外科】急診待床-外科:1 ｜ GS:1
+【其他+兒科】急診待床-其他+兒科:6 ｜ 皮膚科:1 | 兒科:1 | 神內:3 | 婦產科:1
+總待床數:12｜ 總空床數:14 ｜ NSICU(4/0) ｜ MICU(3/0) ｜ EDICU(5/2) ｜ CCU(0/0) ｜ SICU(0/3) ｜ CVSICU(0/6) ｜ NICU(0/3)"></textarea>
+    <div class="row">
+      <label class="date">日期 <input type="date" id="dateInput"></label>
+      <button id="fillBtn">填入表格</button>
+      <button class="plain" id="clearBtn">清空歸零</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card tight">
+    <h2>2　昨日入住 ICU 人數<small>文字裡沒有這欄，直接點格子輸入數字。</small></h2>
+    <div class="grid7" id="ystGrid"></div>
+    <div class="row"><button class="plain" id="ystZero">整列歸零</button></div>
+  </div>
+
+  <div class="card">
+    <h2>3　確認並存成圖片<small>表格裡任何數字都能點下去修改，小計會自動重算。</small></h2>
+    <div class="fitbox" id="fitBox">
+      <div id="board">
+        <div class="title" id="boardDate">2026-07-24</div>
+        <table>
+          <colgroup>
+            <col class="c1"><col class="c2">
+            <col class="cd"><col class="cd"><col class="cd"><col class="cd"><col class="cd">
+            <col class="cd"><col class="cd"><col class="cd"><col class="cd">
+          </colgroup>
+          <tr class="head">
+            <td class="hd c1">各科系<br>待床人數小計</td><td class="hd c2">科系</td>
+            <td class="total-label" colspan="4">病房總待床數</td>
+            <td class="total-num" colspan="5" id="grandTotal">0</td>
+          </tr>
+          <tr class="r-im-lbl">
+            <td class="c1 sum" rowspan="2" id="sum-im">0</td><td class="c2 lbl">內科系</td>
+            <td>腸胃</td><td>一般內科</td><td>感染</td><td>胸腔</td>
+            <td>心內</td><td>血腫</td><td>新代</td><td>腎臟</td><td>風濕</td>
+          </tr>
+          <tr class="r-im-val">
+            <td class="c2">等床數</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="腸胃">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="一般內科">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="感染">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="胸腔">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="心內">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="血腫">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="新代">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="腎臟">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="im" data-k="風濕">0</td>
+          </tr>
+          <tr class="r-su-lbl">
+            <td class="c1 sum" rowspan="2" id="sum-su">0</td><td class="c2 lbl">外科系</td>
+            <td>心外</td><td>神外</td><td>外傷</td><td>GS</td>
+            <td>整外</td><td>骨科</td><td>直腸</td><td>泌尿</td><td></td>
+          </tr>
+          <tr class="r-su-val">
+            <td class="c2">等床數</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="心外">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="神外">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="外傷">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="GS">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="整外">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="骨科">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="直腸">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="su" data-k="泌尿">0</td>
+            <td></td>
+          </tr>
+          <tr class="r-ot-lbl">
+            <td class="c1 sum" rowspan="2" id="sum-ot">0</td><td class="c2 lbl">其他科系</td>
+            <td>神內</td><td>兒科</td><td>婦產</td><td>ENT</td>
+            <td>13K</td><td>眼科</td><td>皮膚</td><td>血液</td><td></td>
+          </tr>
+          <tr class="r-ot-val">
+            <td class="c2">等床數</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="神內">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="兒科">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="婦產">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="ENT">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="13K">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="眼科">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="皮膚">0</td>
+            <td class="edit" contenteditable inputmode="numeric" data-g="ot" data-k="血液">0</td>
+            <td></td>
+          </tr>
+        </table>
+
+        <div class="icu-gap"></div>
+
+        <table>
+          <colgroup>
+            <col class="c1"><col class="c2">
+            <col class="cd"><col class="cd"><col class="cd"><col class="cd">
+            <col class="cd"><col class="cd"><col class="cd">
+          </colgroup>
+          <tr class="icu-top">
+            <td class="icu-head" colspan="2">ICU病床狀況</td>
+            <td class="blank" colspan="7"></td>
+          </tr>
+          <tr class="r-icu">
+            <td class="c1">小計</td><td class="c2">科別</td>
+            <td>MICU</td><td>RCC</td><td>CCU</td><td>NICU</td><td>NSICU</td><td>TS</td><td>其他</td>
+          </tr>
+          <tr class="r-icu">
+            <td class="c1" id="sum-icu">0</td><td class="c2">現況等床人數</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="icu" data-k="MICU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="icu" data-k="RCC">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="icu" data-k="CCU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="icu" data-k="NICU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="icu" data-k="NSICU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="icu" data-k="TS">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="icu" data-k="其他">0</td>
+          </tr>
+          <tr class="r-icu">
+            <td class="c1" id="sum-yst">0</td><td class="c2">昨日入住ICU人數</td>
+            <td class="v" data-g="yst" data-k="MICU">0</td>
+            <td class="v" data-g="yst" data-k="RCC">0</td>
+            <td class="v" data-g="yst" data-k="CCU">0</td>
+            <td class="v" data-g="yst" data-k="NICU">0</td>
+            <td class="v" data-g="yst" data-k="NSICU">0</td>
+            <td class="v" data-g="yst" data-k="TS">0</td>
+            <td class="v" data-g="yst" data-k="其他">0</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+    <div class="row">
+      <button id="pngBtn">下載 PNG 圖片</button>
+      <button class="ghost" id="copyBtn">複製圖片</button>
+    </div>
+    <div class="msg" id="msg2"></div>
+    <p class="hint">ICU 對照：MICU＋EDICU→MICU、NSICU→NSICU、CCU→CCU、NICU→NICU、SICU→TS、CVICU／CVSICU→其他。RCC 文字裡沒有，需要時自行點格子填。</p>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+const ALIAS = {
+  im:{'腸胃':'腸胃','胃腸':'腸胃','腸胃科':'腸胃','一般內科':'一般內科','內科':'一般內科','一般':'一般內科',
+      '感染':'感染','感染科':'感染','胸腔':'胸腔','胸腔科':'胸腔','心內':'心內','心臟內科':'心內','心臟科':'心內',
+      '血腫':'血腫','血液腫瘤':'血腫','腫瘤':'血腫','新代':'新代','新陳代謝':'新代','內分泌':'新代',
+      '腎臟':'腎臟','腎臟科':'腎臟','腎內':'腎臟','風濕':'風濕','風濕免疫':'風濕','免疫':'風濕'},
+  su:{'心外':'心外','心臟外科':'心外','神外':'神外','神經外科':'神外','外傷':'外傷','外傷科':'外傷',
+      'GS':'GS','一般外科':'GS','整外':'整外','整形外科':'整外','骨科':'骨科','骨外':'骨科',
+      '直腸':'直腸','大腸直腸':'直腸','大腸直腸外科':'直腸','泌尿':'泌尿','泌尿科':'泌尿'},
+  ot:{'神內':'神內','神經內科':'神內','兒科':'兒科','小兒科':'兒科','兒童':'兒科',
+      '婦產':'婦產','婦產科':'婦產','婦科':'婦產','ENT':'ENT','耳鼻喉':'ENT','耳鼻喉科':'ENT',
+      '13K':'13K','眼科':'眼科','皮膚':'皮膚','皮膚科':'皮膚','血液':'血液','血液科':'血液'}
+};
+const ICU_MAP = {MICU:'MICU', EDICU:'MICU', RCC:'RCC', CCU:'CCU', NICU:'NICU',
+                 NSICU:'NSICU', SICU:'TS', TS:'TS', CVICU:'其他', CVSICU:'其他'};
+const ICU_COLS = ['MICU','RCC','CCU','NICU','NSICU','TS','其他'];
+
+const cell = (g,k) => document.querySelector('td[data-g="'+g+'"][data-k="'+k+'"]');
+const val = td => { const n = parseInt(String(td.textContent).replace(/[^\d-]/g,''),10); return isNaN(n)?0:n; };
+const setVal = (g,k,v) => { const td = cell(g,k); if(td) td.textContent = v; };
+
+const ystGrid = $('#ystGrid');
+ICU_COLS.forEach(k=>{
+  const f = document.createElement('div');
+  f.className = 'fld';
+  f.innerHTML = '<span>'+k+'</span>'+
+    '<input type="number" min="0" inputmode="numeric" value="0" data-yst="'+k+'" aria-label="'+k+' 昨日入住人數">';
+  ystGrid.appendChild(f);
+});
+ystGrid.addEventListener('input', syncYst);
+ystGrid.addEventListener('focusin', e=>{ if(e.target.value==='0') e.target.select(); });
+function syncYst(){
+  $$('#ystGrid input').forEach(inp=>{
+    setVal('yst', inp.dataset.yst, Math.max(0, parseInt(inp.value,10)||0));
+  });
+  recalc();
+}
+$('#ystZero').addEventListener('click', ()=>{ $$('#ystGrid input').forEach(i=>i.value=0); syncYst(); });
+
+function recalc(){
+  let grand = 0;
+  ['im','su','ot'].forEach(g=>{
+    const s = $$('td[data-g="'+g+'"]').reduce((a,td)=>a+val(td),0);
+    $('#sum-'+g).textContent = s; grand += s;
+  });
+  $('#grandTotal').textContent = grand;
+  $('#sum-icu').textContent = $$('td[data-g="icu"]').reduce((a,td)=>a+val(td),0);
+  $('#sum-yst').textContent = $$('td[data-g="yst"]').reduce((a,td)=>a+val(td),0);
+}
+
+$$('td.edit').forEach(td=>{
+  td.addEventListener('input', recalc);
+  td.addEventListener('focus', ()=>{ if(val(td)===0) td.textContent=''; });
+  td.addEventListener('blur', ()=>{ td.textContent = val(td); recalc(); });
+  td.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); td.blur(); } });
+});
+
+const say = (el,t,k) => { el.className = 'msg '+k; el.textContent = t; };
+
+function parseText(text){
+  const notes=[], unknown=[], groups={im:{},su:{},ot:{},icu:{}}, reported={};
+  text.split(/\r?\n/).forEach(line=>{
+    if(!line.trim()) return;
+    let g=null;
+    if(/內科/.test(line) && /【/.test(line) && !/其他/.test(line)) g='im';
+    else if(/【外科】|急診待床-外科/.test(line)) g='su';
+    else if(/其他/.test(line)) g='ot';
+    if(!g) return;
+    line.replace(/【[^】]*】/,'').split(/[｜|]/).forEach(part=>{
+      const m = part.match(/([^:：]+)[:：]\s*(-?\d+)/); if(!m) return;
+      const name = m[1].replace(/\s|　/g,'').replace(/^急診待床-?/,'');
+      const n = parseInt(m[2],10);
+      if(/急診待床/.test(part) && /^(內科|外科|其他\+?兒科|其他)$/.test(name)){ reported[g]=n; return; }
+      const key = ALIAS[g][name] || ALIAS[g][name.replace(/科$/,'')];
+      if(key) groups[g][key] = (groups[g][key]||0) + n;
+      else unknown.push(name+':'+n);
+    });
+  });
+
+  const re = /([A-Za-z][A-Za-z0-9]*)\s*[（(]\s*(\d+)\s*\/\s*(\d+)\s*[)）]/g;
+  let m, foundICU=false, merged=[];
+  while((m = re.exec(text))!==null){
+    foundICU = true;
+    const name = m[1].toUpperCase(), wait = parseInt(m[2],10);
+    const col = ICU_MAP[name];
+    if(col){
+      groups.icu[col] = (groups.icu[col]||0) + wait;
+      if(col !== name) merged.push(name+'→'+col);
+    }else{
+      groups.icu['其他'] = (groups.icu['其他']||0) + wait;
+      notes.push(name+' 未在對照表，已計入「其他」');
+    }
+  }
+  if(merged.length) notes.push(merged.join('、'));
+
+  const d = text.match(/(20\d{2})[-\/年](\d{1,2})[-\/月](\d{1,2})/);
+  const date = d ? d[1]+'-'+String(d[2]).padStart(2,'0')+'-'+String(d[3]).padStart(2,'0') : null;
+  return {groups, unknown, notes, reported, date, foundICU};
+}
+
+$('#fillBtn').addEventListener('click', ()=>{
+  const text = $('#src').value;
+  if(!text.trim()){ say($('#msg'),'還沒有內容可以填，先把今天的文字貼上來。','warn'); return; }
+  const r = parseText(text);
+  ['im','su','ot'].forEach(g=>{
+    $$('td[data-g="'+g+'"]').forEach(td=>td.textContent='0');
+    Object.entries(r.groups[g]).forEach(([k,v])=>setVal(g,k,v));
+  });
+  if(r.foundICU){
+    $$('td[data-g="icu"]').forEach(td=>td.textContent='0');
+    Object.entries(r.groups.icu).forEach(([k,v])=>setVal('icu',k,v));
+  }
+  recalc(); fit();
+  if(r.date){ $('#dateInput').value = r.date; $('#boardDate').textContent = r.date; }
+
+  const problems = [];
+  ['im','su','ot'].forEach(g=>{
+    if(r.reported[g]===undefined) return;
+    const s = parseInt($('#sum-'+g).textContent,10);
+    const label = {im:'內科',su:'外科',ot:'其他+兒科'}[g];
+    if(s !== r.reported[g]) problems.push(label+'小計 '+r.reported[g]+'，但各科加總 '+s);
+  });
+  if(r.unknown.length) problems.push('對不到欄位：'+r.unknown.join('、'));
+  if(problems.length) say($('#msg'),'已填入，但請檢查：'+problems.join('；')+'。可直接點表格修正。','warn');
+  else say($('#msg'),'已填入'+(r.notes.length?'（'+r.notes.join('；')+'）':'')+'。接著填昨日入住 ICU 人數。','ok');
+});
+
+$('#clearBtn').addEventListener('click', ()=>{
+  $$('td.edit').forEach(td=>td.textContent='0');
+  $$('#ystGrid input').forEach(i=>i.value=0);
+  syncYst(); say($('#msg'),'表格已歸零。','ok');
+});
+
+$('#dateInput').addEventListener('change', e=>{ if(e.target.value) $('#boardDate').textContent = e.target.value; });
+
+const board = $('#board'), fitBox = $('#fitBox');
+function fit(){
+  board.style.transform = 'none';
+  const s = Math.min(1, fitBox.clientWidth / board.offsetWidth);
+  board.style.transform = 'scale('+s+')';
+  fitBox.style.height = (board.offsetHeight * s) + 'px';
+}
+window.addEventListener('resize', fit);
+
+async function render(){
+  if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  board.style.transform = 'none';
+  fitBox.style.height = 'auto';
+  try{
+    return await html2canvas(board, {scale:3, backgroundColor:'#ffffff', logging:false});
+  } finally { fit(); }
+}
+$('#pngBtn').addEventListener('click', async ()=>{
+  try{
+    const c = await render();
+    const a = document.createElement('a');
+    a.download = '急診待床_' + $('#boardDate').textContent.trim() + '.png';
+    a.href = c.toDataURL('image/png'); a.click();
+    say($('#msg2'),'圖片已下載，手機請到「下載」或相簿查看。','ok');
+  }catch(e){ say($('#msg2'),'產圖失敗，請重新整理頁面再試一次。','warn'); }
+});
+$('#copyBtn').addEventListener('click', async ()=>{
+  try{
+    const c = await render();
+    const blob = await new Promise(res=>c.toBlob(res,'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+    say($('#msg2'),'圖片已複製，可直接貼到 LINE 或報告裡。','ok');
+  }catch(e){ say($('#msg2'),'這個瀏覽器不支援複製圖片，請改用「下載 PNG 圖片」。','warn'); }
+});
+
+(function init(){
+  const t = new Date(), p = n=>String(n).padStart(2,'0');
+  const today = t.getFullYear()+'-'+p(t.getMonth()+1)+'-'+p(t.getDate());
+  $('#dateInput').value = today;
+  $('#boardDate').textContent = today;
+  recalc(); fit();
+})();
+</script>
