@@ -10,7 +10,7 @@
     --im-lite:#b4c6e7; --im-dark:#9bc2e6;
     --su-lite:#f8cbad; --su-dark:#f4b084;
     --ot-lite:#c6e0b4; --ot-dark:#a9d08e;
-    --icu-head:#dfa7e6; --:#e6ccff; --icu-ink:#7030a0;
+    --icu-head:#dfa7e6; --icu-lite:#e6ccff; --icu-ink:#7030a0;
     --hdr-grey:#f2f2f2; --red:#ff0000;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -77,8 +77,9 @@
 
   #board tr.icu-top td.icu-head{background:var(--icu-head);color:#000;font-weight:700}
   #board tr.icu-top td.blank{background:#fff;border-left:none;border-bottom:none}
-  #board tr.r-icu td{background:#fff;color:#000;font-weight:700}
+  #board tr.r-icu td{background:var(--icu-lite);color:#000;font-weight:700}
   #board tr.r-icu td.v{background:#fff;color:#000;font-weight:400}
+  #board tr.r-icu td.u{background:#fff;color:#000;font-weight:700}
   #board #sum-icu,#board #sum-yst{color:var(--red);font-weight:700}
   #board .icu-gap{height:21px}
 
@@ -202,7 +203,7 @@
           </tr>
           <tr class="r-icu">
             <td class="c1">小計</td><td class="c2">科別</td>
-            <td>MICU</td><td>RCC</td><td>CCU</td><td>NICU</td><td>NSICU</td><td>TS</td><td>其他</td>
+            <td class="u">MICU</td><td class="u">RCC</td><td class="u">CCU</td><td class="u">NICU</td><td class="u">NSICU</td><td class="u">TS</td><td class="u">其他</td>
           </tr>
           <tr class="r-icu">
             <td class="c1" id="sum-icu">0</td><td class="c2">現況等床人數</td>
