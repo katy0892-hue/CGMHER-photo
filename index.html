@@ -230,6 +230,7 @@
     </div>
     <div class="row">
       <button id="pngBtn">下載 PNG 圖片</button>
+      <button class="ghost" id="xlsBtn">下載 Excel 檔</button>
       <button class="ghost" id="copyBtn">複製圖片</button>
     </div>
     <div class="msg" id="msg2"></div>
@@ -409,6 +410,159 @@ $('#copyBtn').addEventListener('click', async ()=>{
     await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
     say($('#msg2'),'圖片已複製，可直接貼到 LINE 或報告裡。','ok');
   }catch(e){ say($('#msg2'),'這個瀏覽器不支援複製圖片，請改用「下載 PNG 圖片」。','warn'); }
+});
+
+/* ===== 零依賴 XLSX 產生器 ===== */
+var XG=(function(){
+  var TBL=(function(){var t=[],c,n,k;for(n=0;n<256;n++){c=n;for(k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+  function crc32(b){var c=0xFFFFFFFF;for(var i=0;i<b.length;i++)c=TBL[(c^b[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+  function enc(s){return new TextEncoder().encode(s);}
+  function w16(a,o,v){a[o]=v&255;a[o+1]=(v>>>8)&255;}
+  function w32(a,o,v){a[o]=v&255;a[o+1]=(v>>>8)&255;a[o+2]=(v>>>16)&255;a[o+3]=(v>>>24)&255;}
+  function zip(files){
+    var parts=[],central=[],offset=0;
+    files.forEach(function(f){
+      var name=enc(f.name),data=(typeof f.data==='string')?enc(f.data):f.data,crc=crc32(data);
+      var lh=new Uint8Array(30+name.length);
+      w32(lh,0,0x04034b50);w16(lh,4,20);w16(lh,6,0x0800);w16(lh,8,0);w16(lh,10,0);w16(lh,12,0x2821);
+      w32(lh,14,crc);w32(lh,18,data.length);w32(lh,22,data.length);
+      w16(lh,26,name.length);w16(lh,28,0);lh.set(name,30);
+      parts.push(lh,data);
+      var cd=new Uint8Array(46+name.length);
+      w32(cd,0,0x02014b50);w16(cd,4,20);w16(cd,6,20);w16(cd,8,0x0800);w16(cd,10,0);w16(cd,12,0);w16(cd,14,0x2821);
+      w32(cd,16,crc);w32(cd,20,data.length);w32(cd,24,data.length);
+      w16(cd,28,name.length);w16(cd,30,0);w16(cd,32,0);w16(cd,34,0);w16(cd,36,0);
+      w32(cd,38,0x81a40000|0);w32(cd,42,offset);cd.set(name,46);
+      central.push(cd);offset+=lh.length+data.length;
+    });
+    var cdSize=central.reduce(function(a,c){return a+c.length;},0);
+    var eo=new Uint8Array(22);
+    w32(eo,0,0x06054b50);w16(eo,8,files.length);w16(eo,10,files.length);w32(eo,12,cdSize);w32(eo,16,offset);
+    var all=parts.concat(central,[eo]);
+    var total=all.reduce(function(a,c){return a+c.length;},0),out=new Uint8Array(total),p=0;
+    all.forEach(function(c){out.set(c,p);p+=c.length;});
+    return out;
+  }
+  var esc=function(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+  var COL=function(n){var s='';n++;while(n>0){var m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=Math.floor((n-1)/26);}return s;};
+  function build(o){
+    var fonts=o.styles.map(function(s){return '<font><sz val="'+(s.size||11)+'"/><color rgb="FF'+(s.color||'000000')+'"/><name val="Microsoft JhengHei"/>'+(s.bold?'<b/>':'')+'</font>';});
+    var fills=['<fill><patternFill patternType="none"/></fill>','<fill><patternFill patternType="gray125"/></fill>']
+      .concat(o.fills.map(function(c){return '<fill><patternFill patternType="solid"><fgColor rgb="FF'+c+'"/><bgColor indexed="64"/></patternFill></fill>';}));
+    var border='<border><left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right>'+
+      '<top style="thin"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom></border>';
+    var xfs=o.styles.map(function(s,i){
+      var fillId=(s.fill===null||s.fill===undefined)?0:s.fill+2;
+      return '<xf numFmtId="0" fontId="'+i+'" fillId="'+fillId+'" borderId="'+(s.noBorder?0:1)+'" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">'+
+        '<alignment horizontal="center" vertical="center" wrapText="'+(s.wrap?'1':'0')+'"/></xf>';
+    });
+    var styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+      '<fonts count="'+fonts.length+'">'+fonts.join('')+'</fonts><fills count="'+fills.length+'">'+fills.join('')+'</fills>'+
+      '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'+border+'</borders>'+
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+      '<cellXfs count="'+xfs.length+'">'+xfs.join('')+'</cellXfs>'+
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+    var merges=[],rowsXml=[];
+    o.rows.forEach(function(row,ri){
+      var cells=[];
+      row.cells.forEach(function(c,ci){
+        if(!c) return;
+        var ref=COL(ci)+(ri+1);
+        if(c.span&&(c.span.c>1||c.span.r>1)) merges.push(ref+':'+COL(ci+(c.span.c||1)-1)+(ri+(c.span.r||1)));
+        var sA=' s="'+(c.s||0)+'"';
+        if(c.v===''||c.v===null||c.v===undefined) cells.push('<c r="'+ref+'"'+sA+'/>');
+        else if(typeof c.v==='number') cells.push('<c r="'+ref+'"'+sA+'><v>'+c.v+'</v></c>');
+        else cells.push('<c r="'+ref+'"'+sA+' t="inlineStr"><is><t>'+esc(c.v)+'</t></is></c>');
+      });
+      rowsXml.push('<row r="'+(ri+1)+'"'+(row.h?' ht="'+row.h+'" customHeight="1"':'')+'>'+cells.join('')+'</row>');
+    });
+    var colsXml=o.cols.map(function(c,i){return '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+(Math.round(c.w/7*100)/100)+'" customWidth="1"/>';}).join('');
+    var sheet='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+      '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews>'+
+      '<cols>'+colsXml+'</cols><sheetData>'+rowsXml.join('')+'</sheetData>'+
+      (merges.length?'<mergeCells count="'+merges.length+'">'+merges.map(function(m){return '<mergeCell ref="'+m+'"/>';}).join('')+'</mergeCells>':'')+
+      '<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/>'+
+      '<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="1"/></worksheet>';
+    return zip([
+      {name:'[Content_Types].xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'+
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'+
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'},
+      {name:'_rels/.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+      {name:'xl/workbook.xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '+
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+esc(o.sheetName||'急診待床')+'" sheetId="1" r:id="rId1"/></sheets></workbook>'},
+      {name:'xl/_rels/workbook.xml.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'+
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
+      {name:'xl/styles.xml',data:styles},
+      {name:'xl/worksheets/sheet1.xml',data:sheet}
+    ]);
+  }
+  return {build:build};
+})();
+
+/* ===== 依看板內容組出 Excel ===== */
+const XL_FILLS=['FFFF00','F2F2F2','B4C6E7','9BC2E6','F4B084','F8CBAD','A9D08E','C6E0B4','DFA7E6','E6CCFF','FFFFFF'];
+const XL_STYLES=[
+  {size:20,noBorder:true},{fill:1,size:10,wrap:true},{fill:0,size:16,bold:true},{fill:0,size:16,bold:true,color:'FF0000'},
+  {fill:2,bold:true,color:'FF0000'},{fill:2},{fill:2,size:13,bold:true,color:'FF0000'},{fill:3},
+  {fill:4,bold:true,color:'FF0000'},{fill:4},{fill:5,size:13,bold:true,color:'FF0000'},{fill:5},
+  {fill:6,bold:true,color:'FF0000'},{fill:6},{fill:7,size:13,bold:true,color:'FF0000'},{fill:7},
+  {fill:8,bold:true},{fill:9,bold:true},{fill:9,size:13,bold:true,color:'FF0000'},{fill:10}
+];
+const XS={title:0,hdr:1,yelL:2,yelN:3,imL:4,imN:5,imS:6,imV:7,suL:8,suN:9,suS:10,suV:11,
+          otL:12,otN:13,otS:14,otV:15,icuH:16,icuC:17,icuS:18,icuV:19};
+const IM_COLS=['腸胃','一般內科','感染','胸腔','心內','血腫','新代','腎臟','風濕'];
+const SU_COLS=['心外','神外','外傷','GS','整外','骨科','直腸','泌尿'];
+const OT_COLS=['神內','兒科','婦產','ENT','13K','眼科','皮膚','血液'];
+
+function readGroup(g,cols){ return cols.map(k=>val(cell(g,k))); }
+
+function buildWorkbook(){
+  const rows=[];
+  const date=$('#boardDate').textContent.trim();
+  const im=readGroup('im',IM_COLS), su=readGroup('su',SU_COLS), ot=readGroup('ot',OT_COLS);
+  const icu=readGroup('icu',ICU_COLS), yst=readGroup('yst',ICU_COLS);
+  const S=a=>a.reduce((x,y)=>x+y,0);
+
+  rows.push({h:32,cells:[{v:date,s:XS.title,span:{c:11,r:1}}]});
+  rows.push({h:31,cells:[
+    {v:'各科系\n待床人數小計',s:XS.hdr},{v:'科系',s:XS.hdr},
+    {v:'病房總待床數',s:XS.yelL,span:{c:4,r:1}},{v:'',s:XS.yelL},{v:'',s:XS.yelL},{v:'',s:XS.yelL},
+    {v:S(im)+S(su)+S(ot),s:XS.yelN,span:{c:5,r:1}},{v:'',s:XS.yelN},{v:'',s:XS.yelN},{v:'',s:XS.yelN},{v:'',s:XS.yelN}
+  ]});
+  [[IM_COLS,im,'內科系',XS.imL,XS.imN,XS.imS,XS.imV],
+   [SU_COLS,su,'外科系',XS.suL,XS.suN,XS.suS,XS.suV],
+   [OT_COLS,ot,'其他科系',XS.otL,XS.otN,XS.otS,XS.otV]].forEach(([names,vals,label,sL,sN,sS,sV])=>{
+    const pad=9-names.length;
+    rows.push({h:18,cells:[{v:S(vals),s:sS,span:{c:1,r:2}},{v:label,s:sL}]
+      .concat(names.map(n=>({v:n,s:sN}))).concat(Array(pad).fill({v:'',s:sN}))});
+    rows.push({h:18,cells:[null,{v:'等床數',s:sV}]
+      .concat(vals.map(v=>({v:v,s:sV}))).concat(Array(pad).fill({v:'',s:sV}))});
+  });
+  rows.push({h:14,cells:[]});
+  rows.push({h:18,cells:[{v:'ICU病床狀況',s:XS.icuH,span:{c:2,r:1}},{v:'',s:XS.icuH}]});
+  rows.push({h:18,cells:[{v:'小計',s:XS.icuC},{v:'科別',s:XS.icuC}].concat(ICU_COLS.map(n=>({v:n,s:XS.icuV})))});
+  rows.push({h:18,cells:[{v:S(icu),s:XS.icuS},{v:'現況等床人數',s:XS.icuC}].concat(icu.map(v=>({v:v,s:XS.icuV})))});
+  rows.push({h:18,cells:[{v:S(yst),s:XS.icuS},{v:'昨日入住ICU人數',s:XS.icuC}].concat(yst.map(v=>({v:v,s:XS.icuV})))});
+
+  return XG.build({cols:[{w:117},{w:125}].concat(Array(9).fill({w:101})),
+                   rows, fills:XL_FILLS, styles:XL_STYLES, sheetName:'急診待床'});
+}
+
+$('#xlsBtn').addEventListener('click', ()=>{
+  try{
+    const bytes=buildWorkbook();
+    const blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.download='急診待床_'+$('#boardDate').textContent.trim()+'.xlsx';
+    a.href=url; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
+    say($('#msg2'),'Excel 檔已下載，格式與顏色和圖片相同。','ok');
+  }catch(e){ say($('#msg2'),'產生 Excel 失敗：'+e.message,'warn'); }
 });
 
 (function init(){
