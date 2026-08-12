@@ -42,14 +42,6 @@
   .msg.warn{display:block;background:var(--warn-soft);color:var(--warn);border:1px solid #f0d3b0}
   .hint{color:var(--slate);font-size:12.5px;margin:12px 0 0}
 
-  /* 昨日入住 ICU：緊湊版 */
-  .grid7{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-  .fld{border:1px solid var(--line);border-radius:8px;padding:4px 4px 5px;background:#fbfdfe;text-align:center}
-  .fld span{display:block;font-size:10.5px;letter-spacing:.04em;color:var(--slate);font-weight:700;margin-bottom:2px}
-  .fld input{width:100%;min-width:0;font:inherit;font-size:17px;font-weight:700;text-align:center;
-    border:1px solid var(--line);border-radius:6px;padding:6px 0;background:#fff;color:var(--ink);-moz-appearance:textfield}
-  .fld input::-webkit-outer-spin-button,.fld input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-
   /* ===== 看板本體：比照原圖配色 ===== */
   .fitbox{overflow:hidden;margin-top:4px}
   #board{background:#fff;padding:6px 10px 12px;display:inline-block;transform-origin:top left;
@@ -86,7 +78,7 @@
   #board td.edit{cursor:text}
   #board td.edit:focus{outline:2px solid #0f5f7a;outline-offset:-2px}
 
-  @media(min-width:520px){ .grid7{grid-template-columns:repeat(7,1fr)} }
+  
   @media(min-width:700px){
     .wrap{padding:28px 20px 60px}
     button{flex:0 1 auto}
@@ -97,7 +89,7 @@
 <div class="wrap">
   <header>
     <h1>急診待床看板產生器</h1>
-    <div class="sub">貼上每日文字 → 補昨日入住 → 存成圖片</div>
+    <div class="sub">貼上每日文字 → 表格微調 → 存成圖片或 Excel</div>
   </header>
 
   <div class="card">
@@ -114,14 +106,8 @@
     <div class="msg" id="msg"></div>
   </div>
 
-  <div class="card tight">
-    <h2>2　昨日入住 ICU 人數<small>文字裡沒有這欄，直接點格子輸入數字。</small></h2>
-    <div class="grid7" id="ystGrid"></div>
-    <div class="row"><button class="plain" id="ystZero">整列歸零</button></div>
-  </div>
-
   <div class="card">
-    <h2>3　確認並存成圖片<small>表格裡任何數字都能點下去修改，小計會自動重算。</small></h2>
+    <h2>2　確認並存檔<small>表格裡任何數字都能點下去修改（含昨日入住ICU人數），小計會自動重算。</small></h2>
     <div class="fitbox" id="fitBox">
       <div id="board">
         <div class="title" id="boardDate">2026-07-24</div>
@@ -217,13 +203,13 @@
           </tr>
           <tr class="r-icu">
             <td class="c1" id="sum-yst">0</td><td class="c2">昨日入住ICU人數</td>
-            <td class="v" data-g="yst" data-k="MICU">0</td>
-            <td class="v" data-g="yst" data-k="RCC">0</td>
-            <td class="v" data-g="yst" data-k="CCU">0</td>
-            <td class="v" data-g="yst" data-k="NICU">0</td>
-            <td class="v" data-g="yst" data-k="NSICU">0</td>
-            <td class="v" data-g="yst" data-k="TS">0</td>
-            <td class="v" data-g="yst" data-k="其他">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="yst" data-k="MICU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="yst" data-k="RCC">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="yst" data-k="CCU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="yst" data-k="NICU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="yst" data-k="NSICU">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="yst" data-k="TS">0</td>
+            <td class="v edit" contenteditable inputmode="numeric" data-g="yst" data-k="其他">0</td>
           </tr>
         </table>
       </div>
@@ -262,24 +248,6 @@ const ICU_COLS = ['MICU','RCC','CCU','NICU','NSICU','TS','其他'];
 const cell = (g,k) => document.querySelector('td[data-g="'+g+'"][data-k="'+k+'"]');
 const val = td => { const n = parseInt(String(td.textContent).replace(/[^\d-]/g,''),10); return isNaN(n)?0:n; };
 const setVal = (g,k,v) => { const td = cell(g,k); if(td) td.textContent = v; };
-
-const ystGrid = $('#ystGrid');
-ICU_COLS.forEach(k=>{
-  const f = document.createElement('div');
-  f.className = 'fld';
-  f.innerHTML = '<span>'+k+'</span>'+
-    '<input type="number" min="0" inputmode="numeric" value="0" data-yst="'+k+'" aria-label="'+k+' 昨日入住人數">';
-  ystGrid.appendChild(f);
-});
-ystGrid.addEventListener('input', syncYst);
-ystGrid.addEventListener('focusin', e=>{ if(e.target.value==='0') e.target.select(); });
-function syncYst(){
-  $$('#ystGrid input').forEach(inp=>{
-    setVal('yst', inp.dataset.yst, Math.max(0, parseInt(inp.value,10)||0));
-  });
-  recalc();
-}
-$('#ystZero').addEventListener('click', ()=>{ $$('#ystGrid input').forEach(i=>i.value=0); syncYst(); });
 
 function recalc(){
   let grand = 0;
@@ -366,13 +334,12 @@ $('#fillBtn').addEventListener('click', ()=>{
   });
   if(r.unknown.length) problems.push('對不到欄位：'+r.unknown.join('、'));
   if(problems.length) say($('#msg'),'已填入，但請檢查：'+problems.join('；')+'。可直接點表格修正。','warn');
-  else say($('#msg'),'已填入'+(r.notes.length?'（'+r.notes.join('；')+'）':'')+'。接著填昨日入住 ICU 人數。','ok');
+  else say($('#msg'),'已填入'+(r.notes.length?'（'+r.notes.join('；')+'）':'')+'。記得在表格最後一列補「昨日入住ICU人數」。','ok');
 });
 
 $('#clearBtn').addEventListener('click', ()=>{
   $$('td.edit').forEach(td=>td.textContent='0');
-  $$('#ystGrid input').forEach(i=>i.value=0);
-  syncYst(); say($('#msg'),'表格已歸零。','ok');
+  recalc(); say($('#msg'),'表格已歸零。','ok');
 });
 
 $('#dateInput').addEventListener('change', e=>{ if(e.target.value) $('#boardDate').textContent = e.target.value; });
